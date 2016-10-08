@@ -46,17 +46,11 @@ class WaterPhysics {
   buoyant(obj) {
     obj.body.pressure = this.ambientPressureAtY(obj.y);
     obj.body.lungs.volume.current = this.volume(obj.body.lungs.mass, obj.body.pressure);
-    obj.body.gravity.y = obj.body.weight + ((this.airDensity - this.waterDensity) * this.gravityConstant * obj.body.lungs.volume.current);
+    obj.body.acceleration.y = obj.body.weight + ((this.airDensity - this.waterDensity) * this.gravityConstant * obj.body.lungs.volume.current);
   }
 }
 
 class Game {
-    constructor(width, height, el) {
-      this.width = width;
-      this.height = height;
-      this.el = el;
-    }
-
     start() {
       this.game = new Phaser.Game(this.width, this.height, Phaser.AUTO, this.el, { preload: this.preload.bind(this), create: this.create.bind(this), update: this.update.bind(this) });
     }
@@ -79,6 +73,7 @@ class Game {
       this.player = this.game.add.sprite(400, 300, 'dude');
       this.waterPhysics.enable(this.player);
       this.player.body.weight = 5;
+      this.player.body.inhaleRate = 0.01;
       this.player.body.collideWorldBounds = true;
       this.player.frame = 4;
 
@@ -90,15 +85,15 @@ class Game {
 
       if (this.game.input.keyboard.isDown(Phaser.KeyCode.SPACEBAR)) {
         if (this.player.body.lungs.volume.current < this.player.body.lungs.volume.max) {
-          this.player.body.lungs.mass += 0.01 * this.player.body.pressure;
+          this.player.body.lungs.mass += this.player.body.inhaleRate * this.player.body.pressure;
         }
       } else {
         if (this.player.body.lungs.volume.current > this.player.body.lungs.volume.min) {
-          this.player.body.lungs.mass -= 0.01 * this.player.body.pressure;
+          this.player.body.lungs.mass -= this.player.body.inhaleRate * this.player.body.pressure;
         }
       }
 
-      this.text.text = `lungs: ${this.player.body.lungs.mass} - gravity: ${this.player.body.gravity.y}`;
+      this.text.text = `lungs: ${this.player.body.lungs.mass} - acceleration: ${this.player.body.acceleration.y}`;
       this.text2.text = `volume: ${this.player.body.lungs.volume.current} - pressure: ${this.player.body.pressure}`;
       this.waterPhysics.buoyant(this.player);
 
