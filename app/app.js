@@ -100,7 +100,7 @@ class Game {
 
       this.text.text = `lungs: ${this.player.body.lungs.mass} - gravity: ${this.player.body.gravity.y}`;
       this.text2.text = `volume: ${this.player.body.lungs.volume.current} - pressure: ${this.player.body.pressure}`;
-      this.waterPhysics.buoyantPhysics(this.player);
+      this.waterPhysics.buoyant(this.player);
 
     }
 }
