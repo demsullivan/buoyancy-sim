@@ -1,6 +1,12 @@
 import config from './config';
 
 
+Object.resolve = function(path, obj) {
+  return path.split('.').reduce(function(prev, curr) {
+    return prev ? prev[curr] : undefined;
+  }, obj || self);
+};
+
 class WaterPhysics {
   constructor(game) {
     this.game = game;
@@ -12,13 +18,13 @@ class WaterPhysics {
     this.restingLungVolume = 0.04;
     this.maxInhaleLungVolume = 0.21;
 
-    this.pixelsPerAtm = 300;
+    this.pixelsPerAtm = 264;
     this.accelerationConstant = 500;
-    this.gravityConstant = 0.98;
   }
 
-  startSystem() {
+  startSystem(g) {
     this.game.physics.startSystem(Phaser.Physics.ARCADE);
+    this.gravityConstant = g;
   }
 
   enable(obj) {
@@ -33,6 +39,14 @@ class WaterPhysics {
       },
       mass: this.restingLungVolume*Math.pow(2, obj.body.pressure - 1)
     };
+    obj.body.bcd = {
+      volume: {
+        min: 0,
+        max: 0.21,
+        current: 0
+      },
+      mass: 0
+    };
   }
 
   ambientPressureAtY(y) {
@@ -46,12 +60,18 @@ class WaterPhysics {
   buoyant(obj) {
     obj.body.pressure = this.ambientPressureAtY(obj.y);
     obj.body.lungs.volume.current = this.volume(obj.body.lungs.mass, obj.body.pressure);
-    obj.body.acceleration.y = obj.body.weight + ((this.airDensity - this.waterDensity) * this.gravityConstant * obj.body.lungs.volume.current);
+    obj.body.bcd.volume.current = this.volume(obj.body.bcd.mass, obj.body.pressure);
+
+    var totalAirVolume = obj.body.lungs.volume.current + obj.body.bcd.volume.current;
+    obj.body.gravity.y = obj.body.weight + ((this.airDensity - this.waterDensity) * this.gravityConstant * totalAirVolume);
   }
 }
 
 class Game {
-    start() {
+    start(weight, g, inhaleRate) {
+      this.weight = weight;
+      this.g = g;
+      this.inhaleRate = inhaleRate;
       this.game = new Phaser.Game(this.width, this.height, Phaser.AUTO, this.el, { preload: this.preload.bind(this), create: this.create.bind(this), update: this.update.bind(this) });
     }
 
@@ -62,7 +82,9 @@ class Game {
 
     create() {
       this.waterPhysics = new WaterPhysics(this.game);
-      this.waterPhysics.startSystem();
+      this.waterPhysics.startSystem(this.g);
+
+      this.debugText = {};
 
       var water = this.game.add.sprite(800, 600, 'water');
       // water.anchor.x = 0.5;
@@ -70,15 +92,40 @@ class Game {
       water.angle = 180;
 
       // place the player in the middle of the world and make it neutrally buoyant at 2 ATM
-      this.player = this.game.add.sprite(400, 300, 'dude');
+      this.player = this.game.add.sprite(400, 264, 'dude');
       this.waterPhysics.enable(this.player);
-      this.player.body.weight = 5;
-      this.player.body.inhaleRate = 0.01;
+      this.player.body.weight = this.weight;
+      this.player.body.inhaleRate = this.inhaleRate;
       this.player.body.collideWorldBounds = true;
       this.player.frame = 4;
 
-      this.text = this.game.add.text(16, 16, `lungs: ${this.player.body.lungs.mass}`, { fontSize: '32px', fill: '#000' });
-      this.text2 = this.game.add.text(16, 48, `pressure: ${this.player.body.pressure}`, { fontSize: '32px', fill: '#000' });
+      this.createDebugText('lungs.mass');
+      this.createDebugText('lungs.volume.current');
+      this.createDebugText('pressure');
+      this.createDebugText('acceleration.y');
+      this.createDebugText('gravity.y');
+      this.createDebugText('bcd.mass');
+      this.createDebugText('bcd.volume.current');
+    }
+
+    createDebugText(attr) {
+      if (!this.debugText.__global) {
+        this.debugText.__global = { y: 16 };
+      } else {
+        this.debugText.__global.y += 16;
+      }
+
+      var val = Object.resolve(attr, this.player.body);
+      this.debugText[attr] = this.game.add.text(16, this.debugText.__global.y, `${attr}: ${val}`, { fontSize: '16px', fill: '#000' });
+    }
+
+    updateDebug() {
+      for (var attr in this.debugText) {
+        if (attr !== '__global') {
+          var val = Object.resolve(attr, this.player.body);
+          this.debugText[attr].text = `${attr}: ${val}`;
+        }
+      }
     }
 
     update() {
@@ -93,16 +140,60 @@ class Game {
         }
       }
 
-      this.text.text = `lungs: ${this.player.body.lungs.mass} - acceleration: ${this.player.body.acceleration.y}`;
-      this.text2.text = `volume: ${this.player.body.lungs.volume.current} - pressure: ${this.player.body.pressure}`;
+      if (this.game.input.keyboard.isDown(Phaser.KeyCode.W)) {
+        if (this.player.body.bcd.volume.current < this.player.body.bcd.volume.max) {
+        this.player.body.bcd.mass += 0.0001 * this.player.body.pressure;
+        }
+      }
+
+      if (this.game.input.keyboard.isDown(Phaser.KeyCode.S)) {
+        if (this.player.body.bcd.volume.current > this.player.body.bcd.volume.min) {
+          this.player.body.bcd.mass -= 0.0001 * this.player.body.pressure;
+        }
+      }
+
+      if (this.game.input.keyboard.isDown(Phaser.KeyCode.RIGHT)) {
+        this.player.x += 0.25;
+      }
+
+      if (this.game.input.keyboard.isDown(Phaser.KeyCode.LEFT)) {
+        this.player.x -= 0.25;
+      }
+
       this.waterPhysics.buoyant(this.player);
+      this.updateDebug();
 
     }
 }
 
 function main() {
   var game = new Game(800, 600, '#application');
-  game.start();
+
+  game.start(5, 0.98, 0.01);
+
+  $('.game-var').on('change', function() {
+    console.log(`${this.id} changed`);
+    switch (this.id) {
+      case "weight":
+        game.player.body.weight = new Number(this.value);
+      case "g":
+        game.waterPhysics.gravityConstant = new Number(this.value);
+      case "inhale-rate":
+        game.player.body.inhaleRate = new Number(this.value);
+    }
+  });
+
+  $('#reset').on('click', function() {
+    console.log("RESET");
+    game.game.destroy();
+
+    var weight = new Number($('#weight').val());
+    var g = new Number($('#g').val());
+    var inhaleRate = new Number($('#inhale-rate').val());
+
+    game = new Game(800, 600, '#application');
+    game.start(weight, g, inhaleRate);
+  });
 }
 
 main();
